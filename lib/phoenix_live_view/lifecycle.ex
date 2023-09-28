@@ -7,6 +7,7 @@ defmodule Phoenix.LiveView.Lifecycle do
   @type hook :: map()
 
   @type t :: %__MODULE__{
+          handle_async: [hook],
           handle_event: [hook],
           handle_info: [hook],
           handle_params: [hook],
@@ -14,7 +15,12 @@ defmodule Phoenix.LiveView.Lifecycle do
           mount: [hook]
         }
 
-  defstruct handle_event: [], handle_info: [], handle_params: [], mount: [], after_render: []
+  defstruct handle_async: [],
+            handle_event: [],
+            handle_info: [],
+            handle_params: [],
+            mount: [],
+            after_render: []
 
   @doc """
   Returns a map of infos about the lifecycle stage for the given `view`.
@@ -31,7 +37,7 @@ defmodule Phoenix.LiveView.Lifecycle do
   end
 
   defp callbacks?(%Socket{private: %{@lifecycle => lifecycle}}, stage)
-       when stage in [:handle_event, :handle_info, :handle_params, :mount] do
+       when stage in [:handle_async, :handle_event, :handle_info, :handle_params, :mount] do
     lifecycle |> Map.fetch!(stage) |> Kernel.!=([])
   end
 
@@ -41,7 +47,7 @@ defmodule Phoenix.LiveView.Lifecycle do
   end
 
   def attach_hook(%Socket{} = socket, id, stage, fun)
-      when stage in [:handle_event, :handle_info, :handle_params, :after_render] do
+      when stage in [:handle_async, :handle_event, :handle_info, :handle_params, :after_render] do
     lifecycle = lifecycle(socket, stage)
     hook = hook!(id, stage, fun)
     existing = Enum.find(Map.fetch!(lifecycle, stage), &(&1.id == id))
@@ -60,15 +66,15 @@ defmodule Phoenix.LiveView.Lifecycle do
   def attach_hook(%Socket{}, _id, stage, _fun) do
     raise ArgumentError, """
     invalid lifecycle event provided to attach_hook.
-
-    Expected one of: :handle_event | :handle_info | :handle_params
-
+    
+    Expected one of: :handle_async | :handle_event | :handle_info | :handle_params
+    
     Got: #{inspect(stage)}
     """
   end
 
   def detach_hook(%Socket{} = socket, id, stage)
-      when stage in [:handle_event, :handle_info, :handle_params, :after_render] do
+      when stage in [:handle_async, :handle_event, :handle_info, :handle_params, :after_render] do
     update_lifecycle(socket, stage, fn hooks ->
       for hook <- hooks, hook.id != id, do: hook
     end)
@@ -77,9 +83,9 @@ defmodule Phoenix.LiveView.Lifecycle do
   def detach_hook(%Socket{}, _id, stage) do
     raise ArgumentError, """
     invalid lifecycle event provided to detach_hook.
-
-    Expected one of: :handle_event | :handle_info | :handle_params
-
+    
+    Expected one of: :handle_async | :handle_event | :handle_info | :handle_params
+    
     Got: #{inspect(stage)}
     """
   end
@@ -118,12 +124,12 @@ defmodule Phoenix.LiveView.Lifecycle do
   def on_mount(view, result) do
     raise ArgumentError, """
     invalid on_mount hook declared in #{inspect(view)}.
-
+    
     Expected one of:
-
+    
         Module
         {Module, arg}
-
+    
     Got: #{inspect(result)}
     """
   end
@@ -192,6 +198,13 @@ defmodule Phoenix.LiveView.Lifecycle do
   end
 
   @doc false
+  def handle_async(params, uri, %Socket{private: %{@lifecycle => lifecycle}} = socket) do
+    reduce_socket(lifecycle.handle_async, socket, fn hook, acc ->
+      hook.function.(params, uri, acc)
+    end)
+  end
+
+  @doc false
   def after_render(%Socket{private: %{@lifecycle => lifecycle}} = socket) do
     {:cont, new_socket} =
       reduce_socket(lifecycle.after_render, socket, fn hook, acc ->
@@ -221,11 +234,11 @@ defmodule Phoenix.LiveView.Lifecycle do
   defp bad_lifecycle_response!(result, hook) do
     raise ArgumentError, """
     invalid return from hook #{inspect(hook.id)} for lifecycle event #{inspect(hook.stage)}.
-
+    
     Expected one of:
-
+    
         #{expected_return(hook)}
-
+    
     Got: #{inspect(result)}
     """
   end
